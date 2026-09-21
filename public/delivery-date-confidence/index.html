@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivery Date Confidence Calculator</title>
+<meta name="description" content="Monte Carlo schedule simulator for project, program and product leads. Turns three-point estimates into P50/P80/P90 delivery dates and shows which task is driving your risk. Runs entirely in your browser.">
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #f0f2f5;
+    --border: #d9dee5;
+    --text: #1b2027;
+    --text-dim: #5b6572;
+    --accent: #2f6fd0;
+    --accent-soft: #e4edfb;
+    --good: #1f8a52;
+    --warn: #b7791f;
+    --bad: #c0392b;
+    --grid: #e3e7ec;
+    --shadow: 0 1px 2px rgba(20,25,35,.06), 0 4px 14px rgba(20,25,35,.05);
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151a;
+      --surface: #1a1e25;
+      --surface-2: #21262e;
+      --border: #303740;
+      --text: #e6e9ee;
+      --text-dim: #9aa4b2;
+      --accent: #6ea8fe;
+      --accent-soft: #1e2a3d;
+      --good: #4ec98a;
+      --warn: #e0b054;
+      --bad: #f0766a;
+      --grid: #2a3039;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.25);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #12151a;
+    --surface: #1a1e25;
+    --surface-2: #21262e;
+    --border: #303740;
+    --text: #e6e9ee;
+    --text-dim: #9aa4b2;
+    --accent: #6ea8fe;
+    --accent-soft: #1e2a3d;
+    --good: #4ec98a;
+    --warn: #e0b054;
+    --bad: #f0766a;
+    --grid: #2a3039;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.25);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; }
+
+  header.top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -.01em; }
+  .sub { color: var(--text-dim); font-size: 13.5px; margin: 0; max-width: 62ch; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--text-dim); margin: 0 0 12px; font-weight: 600; }
+
+  button, select, input {
+    font: inherit;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 7px 10px;
+  }
+  button { cursor: pointer; background: var(--surface-2); }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+  button.ghost { background: transparent; }
+  button.icon { padding: 4px 8px; line-height: 1; color: var(--text-dim); }
+  button.icon:hover { color: var(--bad); border-color: var(--bad); }
+  input[type="number"] { width: 100%; text-align: right; font-variant-numeric: tabular-nums; }
+  input[type="text"] { width: 100%; }
+  input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); font-weight: 600; padding: 0 6px 8px; white-space: nowrap; }
+  th.num, td.num { text-align: right; }
+  td { padding: 3px 4px; vertical-align: middle; }
+  .tbl-scroll { overflow-x: auto; }
+  table.tasks { min-width: 620px; }
+  table.tasks td:nth-child(1) { width: 20%; }
+  table.tasks td:nth-child(2) { width: 34%; }
+  table.tasks td:nth-child(n+3):nth-child(-n+5) { width: 12%; }
+  .row-invalid input { border-color: var(--bad); }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); font-weight: 600; }
+  .field input, .field select { min-width: 140px; }
+
+  .results { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .stat { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+  .stat .k { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); font-weight: 600; }
+  .stat .v { font-size: 20px; font-weight: 650; margin-top: 4px; letter-spacing: -.01em; }
+  .stat .d { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .stat.hero { background: var(--accent-soft); border-color: var(--accent); }
+
+  .verdict { padding: 12px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface-2); font-size: 14.5px; margin-top: 12px; }
+  .verdict b { font-weight: 650; }
+  .verdict.good { border-color: var(--good); }
+  .verdict.warn { border-color: var(--warn); }
+  .verdict.bad { border-color: var(--bad); }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 1px; }
+  .dot.good { background: var(--good); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+
+  canvas { width: 100%; height: 240px; display: block; }
+  .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .chart-grid { grid-template-columns: 1fr; } }
+
+  .bar-wrap { background: var(--surface-2); border-radius: 4px; height: 8px; overflow: hidden; min-width: 60px; }
+  .bar { height: 100%; background: var(--accent); border-radius: 4px; }
+  table.sens td { padding: 7px 6px; border-top: 1px solid var(--grid); font-size: 14px; }
+  table.sens tr:first-child td { border-top: none; }
+
+  .hint { color: var(--text-dim); font-size: 12.5px; margin: 10px 0 0; }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .spacer { flex: 1; }
+  details.help summary { cursor: pointer; font-weight: 600; font-size: 13.5px; }
+  details.help[open] summary { margin-bottom: 10px; }
+  details.help p, details.help li { color: var(--text-dim); font-size: 13.5px; }
+  code { font-family: var(--mono); font-size: .92em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+  footer { color: var(--text-dim); font-size: 12.5px; text-align: center; margin-top: 28px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 9px 16px; border-radius: 20px; font-size: 13.5px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 10; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>Delivery Date Confidence Calculator</h1>
+      <p class="sub">Three-point estimates in, a probability distribution out. Stop committing to the date where everything goes right &mdash; commit to the one you can actually defend.</p>
+    </div>
+    <button id="themeBtn" class="ghost" title="Toggle light/dark">&#9681; Theme</button>
+  </header>
+
+  <section class="card">
+    <h2>1 &middot; Your plan</h2>
+    <div class="tbl-scroll">
+      <table class="tasks">
+        <thead>
+          <tr>
+            <th>Phase</th>
+            <th>Task</th>
+            <th class="num">Best case</th>
+            <th class="num">Likely</th>
+            <th class="num">Worst case</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="taskBody"></tbody>
+      </table>
+    </div>
+    <div class="btn-row">
+      <button id="addBtn">+ Add task</button>
+      <button id="sampleBtn" class="ghost">Load example</button>
+      <button id="clearBtn" class="ghost">Clear all</button>
+      <span class="spacer"></span>
+      <button id="importBtn" class="ghost">Import CSV</button>
+      <button id="exportBtn" class="ghost">Export CSV</button>
+      <input type="file" id="fileInput" accept=".csv,text/csv" class="sr">
+    </div>
+    <p class="hint">Estimates are in days. Tasks sharing a <b>phase</b> run in parallel (the phase takes as long as its slowest task); phases run one after another. Give every task its own phase name for a purely sequential plan.</p>
+  </section>
+
+  <section class="card">
+    <h2>2 &middot; Settings</h2>
+    <div class="controls">
+      <div class="field">
+        <label for="startDate">Start date</label>
+        <input type="date" id="startDate">
+      </div>
+      <div class="field">
+        <label for="dayMode">Day type</label>
+        <select id="dayMode">
+          <option value="business">Working days (Mon&ndash;Fri)</option>
+          <option value="calendar">Calendar days</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="dist">Distribution</label>
+        <select id="dist">
+          <option value="pert">PERT (weights the likely case)</option>
+          <option value="triangular">Triangular (flatter tails)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="iters">Simulations</label>
+        <select id="iters">
+          <option value="5000">5,000</option>
+          <option value="20000" selected>20,000</option>
+          <option value="100000">100,000</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="targetDate">Committed date <span style="text-transform:none;font-weight:400">(optional)</span></label>
+        <input type="date" id="targetDate">
+      </div>
+      <button id="runBtn" class="primary">Run simulation</button>
+    </div>
+  </section>
+
+  <section class="card" id="resultsCard" hidden>
+    <h2>3 &middot; Results</h2>
+    <div class="results" id="statGrid"></div>
+    <div id="verdict"></div>
+  </section>
+
+  <section class="card" id="chartCard" hidden>
+    <h2>Distribution of outcomes</h2>
+    <div class="chart-grid">
+      <div>
+        <canvas id="histCanvas" role="img" aria-label="Histogram of simulated finish dates"></canvas>
+        <p class="hint">How often each finish date came up across the simulations.</p>
+      </div>
+      <div>
+        <canvas id="curveCanvas" role="img" aria-label="Cumulative probability curve of finishing by each date"></canvas>
+        <p class="hint">Read it as: &ldquo;by this date, we finish this often.&rdquo;</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="sensCard" hidden>
+    <h2>What is actually driving your risk</h2>
+    <table class="sens"><tbody id="sensBody"></tbody></table>
+    <p class="hint">Ranked by how strongly each task's swing moves the finish date. The top one or two are where estimate-tightening, de-risking or splitting buys you the most.</p>
+  </section>
+
+  <section class="card" id="exportCard" hidden>
+    <h2>Share it</h2>
+    <div class="btn-row">
+      <button id="copyBtn">Copy summary as Markdown</button>
+      <button id="printBtn" class="ghost">Print / save as PDF</button>
+    </div>
+    <p class="hint">The Markdown summary pastes cleanly into a status doc, a ticket, or a steering-committee deck.</p>
+  </section>
+
+  <section class="card">
+    <details class="help">
+      <summary>How to read this &mdash; and how the math works</summary>
+      <p><b>Why a single date is a bad commitment.</b> Adding up everyone's "likely" estimate produces a plan that only works if nothing runs long. Because delays compound and parallel work waits on its slowest branch, that sum typically lands somewhere near a 20&ndash;40% chance of being met. That is the number most slipped programs were quietly built on.</p>
+      <p><b>P50 / P80 / P90.</b> P80 means four runs in five finished by that date. The gap between P50 and P80 is the size of the risk you are carrying &mdash; a wide gap means your plan's outcome depends heavily on luck, and needs either buffer or de-risking, not optimism.</p>
+      <p><b>The simulation.</b> Each run draws a duration for every task from its three-point estimate, takes the longest task in each phase, and sums the phases. Repeating that tens of thousands of times builds the distribution of possible finish dates. <b>PERT</b> weights the likely case four times as heavily as the extremes (the standard project-estimating choice). <b>Triangular</b> spreads probability more evenly, which is the safer pick when your "likely" figure is really a guess.</p>
+      <p><b>Sensitivity.</b> Each task's sampled duration is correlated against the total across all runs. A high score means that task's uncertainty is what decides your date. Tasks buried inside a parallel phase behind a much longer sibling will score near zero &mdash; they are not on your risk path, and shortening them buys you nothing.</p>
+      <p><b>Estimating honestly.</b> Best case should be genuinely unobstructed, not sandbagged. Worst case should be a bad-but-real week, not a catastrophe. If a task's worst case is more than roughly three times its best case, it is too big &mdash; split it.</p>
+      <p><b>Limits worth knowing.</b> Task durations are drawn independently, so a shared root cause (one vendor, one sick engineer, one flaky environment) that hits several tasks at once is not modelled &mdash; treat the P80 as a floor in that situation. Scope changes, unknown work and cross-phase dependency chains beyond the phase grouping are also out of scope.</p>
+      <p><b>Privacy.</b> Everything runs locally in your browser. No data leaves the page, there is no analytics, no network request and no external script. Your task list is kept in this browser's local storage only, and "Clear all" removes it.</p>
+    </details>
+  </section>
+
+  <footer>
+    Open tool &middot; MIT licensed &middot; Works offline &mdash; save the page and it still runs.
+  </footer>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- state ---------- */
+  var STORE_KEY = "ddc.v1";
+  var tasks = [];
+  var lastRun = null;
+  var uid = 0;
+
+  var EXAMPLE = [
+    { phase: "Discovery",  name: "Requirements + sign-off",  o: 4,  m: 7,  p: 14 },
+    { phase: "Build",      name: "API + data model",         o: 8,  m: 13, p: 25 },
+    { phase: "Build",      name: "Front-end",                o: 6,  m: 10, p: 18 },
+    { phase: "Build",      name: "Third-party integration",  o: 5,  m: 12, p: 30 },
+    { phase: "Hardening",  name: "QA + bug fixes",           o: 5,  m: 8,  p: 16 },
+    { phase: "Launch",     name: "Security review",          o: 2,  m: 4,  p: 12 },
+    { phase: "Launch",     name: "Release prep + comms",     o: 2,  m: 3,  p: 6  }
+  ];
+
+  /* ---------- tiny helpers ---------- */
+  function $(id) { return document.getElementById(id); }
+  function el(tag, attrs) {
+    var n = document.createElement(tag);
+    if (attrs) { for (var k in attrs) { if (k === "text") { n.textContent = attrs[k]; } else { n.setAttribute(k, attrs[k]); } } }
+    return n;
+  }
+  function toast(msg) {
+    var t = $("toast");
+    t.textContent = msg;
+    t.classList.add("show");
+    clearTimeout(toast._h);
+    toast._h = setTimeout(function () { t.classList.remove("show"); }, 2200);
+  }
+  function fmtNum(x, dp) {
+    if (dp === undefined) { dp = 1; }
+    return Number(x).toFixed(dp).replace(/\.0$/, "");
+  }
+
+  /* ---------- dates ---------- */
+  function parseISO(s) {
+    if (!s) { return null; }
+    var p = s.split("-");
+    if (p.length !== 3) { return null; }
+    var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  function toISO(d) {
+    var m = String(d.getMonth() + 1);
+    var day = String(d.getDate());
+    return d.getFullYear() + "-" + (m.length < 2 ? "0" + m : m) + "-" + (day.length < 2 ? "0" + day : day);
+  }
+  function fmtDate(d) {
+    return d.toLocaleDateString(undefined, { weekday: "short", year: "numeric", month: "short", day: "numeric" });
+  }
+  function isWeekend(d) { var w = d.getDay(); return w === 0 || w === 6; }
+
+  // Add N working or calendar days to a start date. Day 0 = the start date itself.
+  function addDays(start, n, businessOnly) {
+    var d = new Date(start.getTime());
+    var remaining = Math.max(0, Math.ceil(n));
+    if (!businessOnly) {
+      d.setDate(d.getDate() + remaining);
+      return d;
+    }
+    while (isWeekend(d)) { d.setDate(d.getDate() + 1); }
+    while (remaining > 0) {
+      d.setDate(d.getDate() + 1);
+      if (!isWeekend(d)) { remaining--; }
+    }
+    return d;
+  }
+
+  // Inverse of addDays: how many days from start until target.
+  function daysBetween(start, target, businessOnly) {
+    var ms = 86400000;
+    var a = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    var b = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+    var raw = Math.round((b - a) / ms);
+    if (!businessOnly) { return raw; }
+    if (raw < 0) { return raw; }
+    var count = 0;
+    var d = new Date(a.getTime());
+    while (isWeekend(d)) { d.setDate(d.getDate() + 1); }
+    while (d < b) {
+      d.setDate(d.getDate() + 1);
+      if (!isWeekend(d)) { count++; }
+    }
+    return count;
+  }
+
+  /* ---------- sampling ---------- */
+  function gauss() {
+    var u = 0, v = 0;
+    while (u === 0) { u = Math.random(); }
+    while (v === 0) { v = Math.random(); }
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+  }
+  // Marsaglia-Tsang gamma sampler
+  function randGamma(k) {
+    if (k < 1) { return randGamma(k + 1) * Math.pow(Math.random(), 1 / k); }
+    var d = k - 1 / 3, c = 1 / Math.sqrt(9 * d), x, v, u;
+    for (;;) {
+      do { x = gauss(); v = 1 + c * x; } while (v <= 0);
+      v = v * v * v;
+      u = Math.random();
+      if (u < 1 - 0.0331 * x * x * x * x) { return d * v; }
+      if (Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) { return d * v; }
+    }
+  }
+  function randBeta(a, b) {
+    var x = randGamma(a), y = randGamma(b);
+    return (x + y) === 0 ? 0.5 : x / (x + y);
+  }
+  // PERT: beta fitted so the mean is (o + 4m + p) / 6
+  function samplePert(o, m, p) {
+    if (p <= o) { return o; }
+    var mean = (o + 4 * m + p) / 6;
+    var a, b;
+    var denom = (m - mean) * (p - o);
+    if (Math.abs(denom) > 1e-9) {
+      a = ((mean - o) * (2 * m - o - p)) / denom;
+      b = (a * (p - mean)) / (mean - o);
+    }
+    if (!isFinite(a) || !isFinite(b) || a <= 0 || b <= 0) {
+      a = 1 + 4 * (m - o) / (p - o);
+      b = 1 + 4 * (p - m) / (p - o);
+    }
+    return o + randBeta(a, b) * (p - o);
+  }
+  function sampleTri(o, m, p) {
+    if (p <= o) { return o; }
+    var u = Math.random(), f = (m - o) / (p - o);
+    return u < f
+      ? o + Math.sqrt(u * (p - o) * (m - o))
+      : p - Math.sqrt((1 - u) * (p - o) * (p - m));
+  }
+
+  /* ---------- simulation ---------- */
+  function simulate(rows, iters, dist) {
+    var n = rows.length;
+    var sampler = dist === "triangular" ? sampleTri : samplePert;
+
+    // group task indices by phase
+    var phaseMap = {}, phaseOrder = [];
+    for (var i = 0; i < n; i++) {
+      var key = rows[i].phase || "(unphased)";
+      if (!phaseMap[key]) { phaseMap[key] = []; phaseOrder.push(key); }
+      phaseMap[key].push(i);
+    }
+    var groups = phaseOrder.map(function (k) { return phaseMap[k]; });
+
+    var totals = new Float64Array(iters);
+    var sums = new Float64Array(n);          // sum of each task's samples
+    var sumSq = new Float64Array(n);         // sum of squares
+    var sumXY = new Float64Array(n);         // sum of task * total
+    var draw = new Float64Array(n);
+    var totalSum = 0, totalSumSq = 0;
+
+    for (var it = 0; it < iters; it++) {
+      var t = 0;
+      for (var g = 0; g < groups.length; g++) {
+        var idx = groups[g], longest = 0;
+        for (var j = 0; j < idx.length; j++) {
+          var r = rows[idx[j]];
+          var v = sampler(r.o, r.m, r.p);
+          draw[idx[j]] = v;
+          if (v > longest) { longest = v; }
+        }
+        t += longest;
+      }
+      totals[it] = t;
+      totalSum += t;
+      totalSumSq += t * t;
+      for (var q = 0; q < n; q++) {
+        var dv = draw[q];
+        sums[q] += dv;
+        sumSq[q] += dv * dv;
+        sumXY[q] += dv * t;
+      }
+    }
+
+    // Pearson correlation of each task against the total
+    var sens = [];
+    var totVar = totalSumSq / iters - Math.pow(totalSum / iters, 2);
+    for (var s = 0; s < n; s++) {
+      var mX = sums[s] / iters;
+      var varX = sumSq[s] / iters - mX * mX;
+      var cov = sumXY[s] / iters - mX * (totalSum / iters);
+      var denom2 = Math.sqrt(Math.max(varX, 0) * Math.max(totVar, 0));
+      sens.push({
+        name: rows[s].name || "Task " + (s + 1),
+        phase: rows[s].phase,
+        r: denom2 > 1e-12 ? Math.max(-1, Math.min(1, cov / denom2)) : 0,
+        spread: rows[s].p - rows[s].o
+      });
+    }
+    sens.sort(function (a, b) { return Math.abs(b.r) - Math.abs(a.r); });
+
+    var sorted = Array.prototype.slice.call(totals).sort(function (a, b) { return a - b; });
+
+    return {
+      totals: totals,
+      sorted: sorted,
+      mean: totalSum / iters,
+      sd: Math.sqrt(Math.max(totVar, 0)),
+      sens: sens,
+      iters: iters,
+      deterministic: groups.reduce(function (acc, idx) {
+        var mx = 0;
+        for (var j = 0; j < idx.length; j++) { mx = Math.max(mx, rows[idx[j]].m); }
+        return acc + mx;
+      }, 0)
+    };
+  }
+
+  function percentile(sorted, p) {
+    if (!sorted.length) { return 0; }
+    var i = (sorted.length - 1) * p;
+    var lo = Math.floor(i), hi = Math.ceil(i);
+    return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+  }
+  function probAtOrBefore(sorted, value) {
+    var lo = 0, hi = sorted.length;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (sorted[mid] <= value) { lo = mid + 1; } else { hi = mid; }
+    }
+    return lo / sorted.length;
+  }
+
+  /* ---------- task table ---------- */
+  function makeRow(t) {
+    var tr = el("tr");
+    tr.dataset.id = t.id;
+
+    function cell(type, key, attrs) {
+      var td = el("td");
+      var inp = el("input", attrs || {});
+      inp.type = type;
+      inp.value = t[key] === null || t[key] === undefined ? "" : t[key];
+      inp.addEventListener("input", function () {
+        t[key] = type === "number" ? (inp.value === "" ? "" : Number(inp.value)) : inp.value;
+        save();
+        validateRow(tr, t);
+      });
+      td.appendChild(inp);
+      return td;
+    }
+
+    tr.appendChild(cell("text", "phase", { placeholder: "Phase", "aria-label": "Phase" }));
+    tr.appendChild(cell("text", "name", { placeholder: "Task name", "aria-label": "Task name" }));
+    tr.appendChild(cell("number", "o", { min: "0", step: "0.5", "aria-label": "Best case days" }));
+    tr.appendChild(cell("number", "m", { min: "0", step: "0.5", "aria-label": "Likely days" }));
+    tr.appendChild(cell("number", "p", { min: "0", step: "0.5", "aria-label": "Worst case days" }));
+
+    var tdDel = el("td");
+    var del = el("button", { class: "icon", title: "Remove task", "aria-label": "Remove task" });
+    del.innerHTML = "&times;";
+    del.addEventListener("click", function () {
+      tasks = tasks.filter(function (x) { return x.id !== t.id; });
+      save();
+      render();
+    });
+    tdDel.appendChild(del);
+    tr.appendChild(tdDel);
+
+    validateRow(tr, t);
+    return tr;
+  }
+
+  function validateRow(tr, t) {
+    var bad = !(isNum(t.o) && isNum(t.m) && isNum(t.p)) || !(t.o <= t.m && t.m <= t.p);
+    tr.classList.toggle("row-invalid", bad && (t.o !== "" || t.m !== "" || t.p !== ""));
+  }
+  function isNum(v) { return typeof v === "number" && isFinite(v) && v >= 0; }
+
+  function render() {
+    var body = $("taskBody");
+    body.textContent = "";
+    tasks.forEach(function (t) { body.appendChild(makeRow(t)); });
+  }
+
+  function addTask(data) {
+    tasks.push({
+      id: ++uid,
+      phase: data && data.phase !== undefined ? data.phase : "",
+      name: data && data.name !== undefined ? data.name : "",
+      o: data && data.o !== undefined ? data.o : "",
+      m: data && data.m !== undefined ? data.m : "",
+      p: data && data.p !== undefined ? data.p : ""
+    });
+  }
+
+  function validTasks() {
+    return tasks.filter(function (t) {
+      return isNum(t.o) && isNum(t.m) && isNum(t.p) && t.o <= t.m && t.m <= t.p;
+    });
+  }
+
+  /* ---------- persistence (best-effort, per-browser only) ---------- */
+  function save() {
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify({
+        tasks: tasks,
+        start: $("startDate").value,
+        target: $("targetDate").value,
+        dayMode: $("dayMode").value,
+        dist: $("dist").value,
+        iters: $("iters").value
+      }));
+    } catch (e) { /* private mode or storage blocked — the tool still works */ }
+  }
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      if (!raw) { return false; }
+      var d = JSON.parse(raw);
+      if (!d || !Array.isArray(d.tasks) || !d.tasks.length) { return false; }
+      tasks = d.tasks.map(function (t) { t.id = ++uid; return t; });
+      if (d.start) { $("startDate").value = d.start; }
+      if (d.target) { $("targetDate").value = d.target; }
+      if (d.dayMode) { $("dayMode").value = d.dayMode; }
+      if (d.dist) { $("dist").value = d.dist; }
+      if (d.iters) { $("iters").value = d.iters; }
+      return true;
+    } catch (e) { return false; }
+  }
+
+  /* ---------- CSV ---------- */
+  function csvEscape(v) {
+    var s = String(v === undefined || v === null ? "" : v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function exportCSV() {
+    var lines = ["Phase,Task,Optimistic,Likely,Pessimistic"];
+    tasks.forEach(function (t) {
+      lines.push([t.phase, t.name, t.o, t.m, t.p].map(csvEscape).join(","));
+    });
+    var blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = el("a", { href: url, download: "schedule-estimates.csv" });
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+  function parseCSVLine(line) {
+    var out = [], cur = "", inQ = false;
+    for (var i = 0; i < line.length; i++) {
+      var c = line[i];
+      if (inQ) {
+        if (c === '"') {
+          if (line[i + 1] === '"') { cur += '"'; i++; } else { inQ = false; }
+        } else { cur += c; }
+      } else if (c === '"') { inQ = true; }
+      else if (c === ",") { out.push(cur); cur = ""; }
+      else { cur += c; }
+    }
+    out.push(cur);
+    return out;
+  }
+  function importCSV(text) {
+    var lines = text.split(/\r?\n/).filter(function (l) { return l.trim() !== ""; });
+    if (!lines.length) { toast("That file looked empty."); return; }
+    if (/phase/i.test(lines[0]) && /task/i.test(lines[0])) { lines.shift(); }
+    var added = 0;
+    var fresh = [];
+    lines.forEach(function (line) {
+      var c = parseCSVLine(line);
+      if (c.length < 5) { return; }
+      var o = parseFloat(c[2]), m = parseFloat(c[3]), p = parseFloat(c[4]);
+      if (!isFinite(o) || !isFinite(m) || !isFinite(p)) { return; }
+      fresh.push({ phase: c[0].trim(), name: c[1].trim(), o: o, m: m, p: p });
+      added++;
+    });
+    if (!added) { toast("No usable rows — expected: Phase, Task, Optimistic, Likely, Pessimistic."); return; }
+    tasks = [];
+    fresh.forEach(addTask);
+    save();
+    render();
+    toast("Imported " + added + " task" + (added === 1 ? "" : "s") + ".");
+  }
+
+  /* ---------- charts ---------- */
+  function setupCanvas(cv) {
+    var dpr = window.devicePixelRatio || 1;
+    var w = cv.clientWidth, h = cv.clientHeight;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    var ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    return { ctx: ctx, w: w, h: h };
+  }
+  function css(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function drawHistogram(run, cfg) {
+    var c = setupCanvas($("histCanvas"));
+    var ctx = c.ctx, W = c.w, H = c.h;
+    var padL = 34, padR = 10, padT = 14, padB = 26;
+    var sorted = run.sorted;
+    var lo = sorted[0], hi = sorted[sorted.length - 1];
+    if (hi <= lo) { hi = lo + 1; }
+    var BINS = 44;
+    var bins = new Array(BINS).fill(0);
+    for (var i = 0; i < sorted.length; i++) {
+      var b = Math.min(BINS - 1, Math.floor((sorted[i] - lo) / (hi - lo) * BINS));
+      bins[b]++;
+    }
+    var maxB = Math.max.apply(null, bins);
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+
+    ctx.strokeStyle = css("--grid");
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padL, padT + plotH + 0.5);
+    ctx.lineTo(padL + plotW, padT + plotH + 0.5);
+    ctx.stroke();
+
+    var bw = plotW / BINS;
+    for (var k = 0; k < BINS; k++) {
+      var hgt = (bins[k] / maxB) * plotH;
+      var vLo = lo + (k / BINS) * (hi - lo);
+      ctx.fillStyle = vLo <= cfg.p50 ? css("--accent") : css("--accent-soft");
+      ctx.globalAlpha = vLo <= cfg.p50 ? 0.85 : 1;
+      ctx.fillRect(padL + k * bw, padT + plotH - hgt, Math.max(bw - 1, 1), hgt);
+      ctx.globalAlpha = 1;
+    }
+
+    function markerX(v) { return padL + ((v - lo) / (hi - lo)) * plotW; }
+    [["P50", cfg.p50, css("--text-dim")], ["P80", cfg.p80, css("--warn")]].forEach(function (mk) {
+      var x = markerX(mk[1]);
+      if (x < padL || x > padL + plotW) { return; }
+      ctx.strokeStyle = mk[2];
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x, padT);
+      ctx.lineTo(x, padT + plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = mk[2];
+      ctx.font = "600 11px system-ui, sans-serif";
+      ctx.textAlign = x > padL + plotW - 30 ? "right" : "left";
+      ctx.fillText(mk[0], x + (ctx.textAlign === "right" ? -4 : 4), padT + 10);
+    });
+
+    ctx.fillStyle = css("--text-dim");
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(fmtNum(lo, 0) + "d", padL, H - 8);
+    ctx.textAlign = "right";
+    ctx.fillText(fmtNum(hi, 0) + "d", padL + plotW, H - 8);
+  }
+
+  function drawCurve(run, cfg) {
+    var c = setupCanvas($("curveCanvas"));
+    var ctx = c.ctx, W = c.w, H = c.h;
+    var padL = 34, padR = 10, padT = 14, padB = 26;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var sorted = run.sorted;
+    var lo = sorted[0], hi = sorted[sorted.length - 1];
+    if (hi <= lo) { hi = lo + 1; }
+
+    ctx.strokeStyle = css("--grid");
+    ctx.lineWidth = 1;
+    ctx.fillStyle = css("--text-dim");
+    ctx.font = "10.5px system-ui, sans-serif";
+    ctx.textAlign = "right";
+    [0, 0.25, 0.5, 0.75, 1].forEach(function (f) {
+      var y = padT + plotH - f * plotH;
+      ctx.beginPath();
+      ctx.moveTo(padL, y + 0.5);
+      ctx.lineTo(padL + plotW, y + 0.5);
+      ctx.stroke();
+      ctx.fillText(Math.round(f * 100) + "%", padL - 6, y + 3.5);
+    });
+
+    ctx.strokeStyle = css("--accent");
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    var STEPS = 180;
+    for (var s = 0; s <= STEPS; s++) {
+      var v = lo + (s / STEPS) * (hi - lo);
+      var prob = probAtOrBefore(sorted, v);
+      var x = padL + (s / STEPS) * plotW;
+      var y = padT + plotH - prob * plotH;
+      if (s === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
+    }
+    ctx.stroke();
+
+    if (cfg.targetDays !== null && cfg.targetDays >= lo && cfg.targetDays <= hi) {
+      var tx = padL + ((cfg.targetDays - lo) / (hi - lo)) * plotW;
+      ctx.strokeStyle = css("--bad");
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(tx, padT);
+      ctx.lineTo(tx, padT + plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = css("--bad");
+      ctx.font = "600 11px system-ui, sans-serif";
+      ctx.textAlign = tx > padL + plotW - 60 ? "right" : "left";
+      ctx.fillText("committed", tx + (ctx.textAlign === "right" ? -4 : 4), padT + 10);
+    }
+
+    ctx.fillStyle = css("--text-dim");
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(fmtNum(lo, 0) + "d", padL, H - 8);
+    ctx.textAlign = "right";
+    ctx.fillText(fmtNum(hi, 0) + "d", padL + plotW, H - 8);
+  }
+
+  /* ---------- run ---------- */
+  function run() {
+    var rows = validTasks();
+    if (rows.length < 1) {
+      toast("Add at least one task with best ≤ likely ≤ worst.");
+      return;
+    }
+    var start = parseISO($("startDate").value);
+    if (!start) { toast("Pick a start date."); return; }
+
+    var businessOnly = $("dayMode").value === "business";
+    var iters = Number($("iters").value);
+    var r = simulate(rows, iters, $("dist").value);
+
+    var p50 = percentile(r.sorted, 0.5);
+    var p80 = percentile(r.sorted, 0.8);
+    var p90 = percentile(r.sorted, 0.9);
+
+    var target = parseISO($("targetDate").value);
+    var targetDays = null, targetProb = null;
+    if (target) {
+      targetDays = daysBetween(start, target, businessOnly);
+      targetProb = probAtOrBefore(r.sorted, targetDays);
+    }
+
+    lastRun = {
+      r: r, p50: p50, p80: p80, p90: p90,
+      start: start, businessOnly: businessOnly,
+      target: target, targetDays: targetDays, targetProb: targetProb,
+      dist: $("dist").value, rows: rows
+    };
+
+    showResults();
+    save();
+  }
+
+  function showResults() {
+    var L = lastRun, r = L.r;
+    var unit = L.businessOnly ? "working days" : "calendar days";
+
+    var stats = [
+      { k: "P50 &mdash; coin flip", v: fmtDate(addDays(L.start, L.p50, L.businessOnly)), d: fmtNum(L.p50) + " " + unit, hero: false },
+      { k: "P80 &mdash; defensible", v: fmtDate(addDays(L.start, L.p80, L.businessOnly)), d: fmtNum(L.p80) + " " + unit, hero: true },
+      { k: "P90 &mdash; conservative", v: fmtDate(addDays(L.start, L.p90, L.businessOnly)), d: fmtNum(L.p90) + " " + unit, hero: false },
+      { k: "Buffer P50 &rarr; P80", v: "+" + fmtNum(L.p80 - L.p50) + " days", d: "the risk you are carrying", hero: false }
+    ];
+
+    var detProb = probAtOrBefore(r.sorted, r.deterministic);
+    stats.push({
+      k: "Naive plan (sum of likely)",
+      v: fmtDate(addDays(L.start, r.deterministic, L.businessOnly)),
+      d: Math.round(detProb * 100) + "% chance of being met",
+      hero: false
+    });
+
+    if (L.target) {
+      stats.push({
+        k: "Committed date",
+        v: Math.round(L.targetProb * 100) + "% confidence",
+        d: fmtDate(L.target),
+        hero: false
+      });
+    }
+
+    var grid = $("statGrid");
+    grid.textContent = "";
+    stats.forEach(function (s) {
+      var d = el("div", { class: "stat" + (s.hero ? " hero" : "") });
+      var k = el("div", { class: "k" }); k.innerHTML = s.k;
+      var v = el("div", { class: "v", text: s.v });
+      var dd = el("div", { class: "d", text: s.d });
+      d.appendChild(k); d.appendChild(v); d.appendChild(dd);
+      grid.appendChild(d);
+    });
+
+    // verdict
+    var vEl = $("verdict");
+    vEl.textContent = "";
+    var box = el("div", { class: "verdict" });
+    var msg;
+    if (L.target) {
+      var pc = Math.round(L.targetProb * 100);
+      var cls = pc >= 75 ? "good" : (pc >= 50 ? "warn" : "bad");
+      box.classList.add(cls);
+      var slip = L.p80 - L.targetDays;
+      if (pc >= 75) {
+        msg = "<span class='dot " + cls + "'></span><b>" + pc + "% confidence</b> in the committed date. That is a commitment you can defend in a steering review.";
+      } else if (pc >= 50) {
+        msg = "<span class='dot " + cls + "'></span><b>" + pc + "% confidence</b> &mdash; roughly a coin flip with a lean. To reach 80% you need about <b>" + fmtNum(Math.max(slip, 0)) + " more days</b>, or you need to cut scope.";
+      } else {
+        msg = "<span class='dot " + cls + "'></span><b>" + pc + "% confidence</b> in the committed date &mdash; this plan is more likely to miss than hit. Closing the gap to 80% takes about <b>" + fmtNum(Math.max(slip, 0)) + " more days</b>. Raise it now, not at the halfway checkpoint.";
+      }
+    } else {
+      var spreadPct = L.p50 > 0 ? (L.p80 - L.p50) / L.p50 : 0;
+      var cls2 = spreadPct < 0.15 ? "good" : (spreadPct < 0.3 ? "warn" : "bad");
+      box.classList.add(cls2);
+      if (cls2 === "good") {
+        msg = "<span class='dot good'></span>Tight distribution &mdash; only <b>" + fmtNum(L.p80 - L.p50) + " days</b> between the coin flip and the defensible date. Commit to the P80 and you have honest margin.";
+      } else if (cls2 === "warn") {
+        msg = "<span class='dot warn'></span>Moderate spread. Commit to the <b>P80 date</b>, and hold the <b>" + fmtNum(L.p80 - L.p50) + " days</b> between P50 and P80 as visible program buffer rather than padding individual tasks.";
+      } else {
+        msg = "<span class='dot bad'></span>Wide spread &mdash; <b>" + fmtNum(L.p80 - L.p50) + " days</b> separate the coin flip from the defensible date. Your outcome depends heavily on how a few uncertain tasks land. De-risk the top driver below before you commit to anything.";
+      }
+    }
+    box.innerHTML = msg;
+    vEl.appendChild(box);
+
+    // sensitivity
+    var sb = $("sensBody");
+    sb.textContent = "";
+    var top = r.sens.slice(0, 8);
+    var maxR = Math.max.apply(null, top.map(function (s) { return Math.abs(s.r); }).concat([0.001]));
+    top.forEach(function (s) {
+      var tr = el("tr");
+      var tdN = el("td");
+      tdN.innerHTML = "<b>" + escapeHTML(s.name) + "</b>" + (s.phase ? " <span style='color:var(--text-dim)'>&middot; " + escapeHTML(s.phase) + "</span>" : "");
+      var tdB = el("td", { style: "width:42%" });
+      var wrap = el("div", { class: "bar-wrap" });
+      var bar = el("div", { class: "bar", style: "width:" + (Math.abs(s.r) / maxR * 100) + "%" });
+      wrap.appendChild(bar);
+      tdB.appendChild(wrap);
+      var tdV = el("td", { class: "num", style: "width:70px;color:var(--text-dim);font-variant-numeric:tabular-nums" , text: s.r.toFixed(2) });
+      tr.appendChild(tdN); tr.appendChild(tdB); tr.appendChild(tdV);
+      sb.appendChild(tr);
+    });
+
+    $("resultsCard").hidden = false;
+    $("chartCard").hidden = false;
+    $("sensCard").hidden = false;
+    $("exportCard").hidden = false;
+
+    drawHistogram(r, L);
+    drawCurve(r, L);
+  }
+
+  function escapeHTML(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  /* ---------- markdown summary ---------- */
+  function markdownSummary() {
+    var L = lastRun;
+    if (!L) { return ""; }
+    var unit = L.businessOnly ? "working days" : "calendar days";
+    var lines = [];
+    lines.push("## Delivery date confidence");
+    lines.push("");
+    lines.push("Start " + toISO(L.start) + " · " + L.rows.length + " tasks · " + L.r.iters.toLocaleString() + " simulations · " + (L.dist === "pert" ? "PERT" : "Triangular") + " · " + unit);
+    lines.push("");
+    lines.push("| Confidence | Finish date | Duration |");
+    lines.push("|---|---|---|");
+    lines.push("| P50 (coin flip) | " + toISO(addDays(L.start, L.p50, L.businessOnly)) + " | " + fmtNum(L.p50) + " d |");
+    lines.push("| **P80 (recommended commit)** | **" + toISO(addDays(L.start, L.p80, L.businessOnly)) + "** | " + fmtNum(L.p80) + " d |");
+    lines.push("| P90 (conservative) | " + toISO(addDays(L.start, L.p90, L.businessOnly)) + " | " + fmtNum(L.p90) + " d |");
+    lines.push("");
+    var detProb = Math.round(probAtOrBefore(L.r.sorted, L.r.deterministic) * 100);
+    lines.push("Summing the \"likely\" estimates gives " + toISO(addDays(L.start, L.r.deterministic, L.businessOnly)) + " — a **" + detProb + "% chance** of being met.");
+    if (L.target) {
+      lines.push("");
+      lines.push("Committed date " + toISO(L.target) + ": **" + Math.round(L.targetProb * 100) + "% confidence**.");
+    }
+    lines.push("");
+    lines.push("### Top risk drivers");
+    L.r.sens.slice(0, 5).forEach(function (s, i) {
+      lines.push((i + 1) + ". " + s.name + (s.phase ? " (" + s.phase + ")" : "") + " — correlation " + s.r.toFixed(2));
+    });
+    lines.push("");
+    lines.push("_Monte Carlo over three-point estimates. Task durations drawn independently; correlated delays are not modelled._");
+    return lines.join("\n");
+  }
+
+  /* ---------- wiring ---------- */
+  $("addBtn").addEventListener("click", function () { addTask(); save(); render(); });
+  $("sampleBtn").addEventListener("click", function () {
+    tasks = []; uid = 0;
+    EXAMPLE.forEach(addTask);
+    save(); render();
+    toast("Example plan loaded — edit it or clear it.");
+  });
+  $("clearBtn").addEventListener("click", function () {
+    tasks = []; uid = 0;
+    try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+    addTask(); addTask(); addTask();
+    save(); render();
+    ["resultsCard", "chartCard", "sensCard", "exportCard"].forEach(function (id) { $(id).hidden = true; });
+    lastRun = null;
+    toast("Cleared.");
+  });
+  $("runBtn").addEventListener("click", run);
+  $("exportBtn").addEventListener("click", exportCSV);
+  $("importBtn").addEventListener("click", function () { $("fileInput").click(); });
+  $("fileInput").addEventListener("change", function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) { return; }
+    var reader = new FileReader();
+    reader.onload = function () { importCSV(String(reader.result)); };
+    reader.readAsText(f);
+    e.target.value = "";
+  });
+  $("copyBtn").addEventListener("click", function () {
+    var md = markdownSummary();
+    if (!md) { return; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(md).then(
+        function () { toast("Summary copied."); },
+        function () { fallbackCopy(md); }
+      );
+    } else { fallbackCopy(md); }
+  });
+  function fallbackCopy(text) {
+    var ta = el("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); toast("Summary copied."); }
+    catch (e) { toast("Copy failed — select the text manually."); }
+    document.body.removeChild(ta);
+  }
+  $("printBtn").addEventListener("click", function () { window.print(); });
+  $("themeBtn").addEventListener("click", function () {
+    var cur = document.documentElement.getAttribute("data-theme");
+    var isDark = cur ? cur === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.setAttribute("data-theme", isDark ? "light" : "dark");
+    if (lastRun) { drawHistogram(lastRun.r, lastRun); drawCurve(lastRun.r, lastRun); }
+  });
+  ["startDate", "targetDate", "dayMode", "dist", "iters"].forEach(function (id) {
+    $(id).addEventListener("change", save);
+  });
+
+  var resizeT;
+  window.addEventListener("resize", function () {
+    if (!lastRun) { return; }
+    clearTimeout(resizeT);
+    resizeT = setTimeout(function () { drawHistogram(lastRun.r, lastRun); drawCurve(lastRun.r, lastRun); }, 150);
+  });
+
+  /* ---------- boot ---------- */
+  var today = new Date();
+  $("startDate").value = toISO(today);
+  if (!load()) {
+    EXAMPLE.forEach(addTask);
+  }
+  render();
+})();
+</script>
+</body>
+</html>
