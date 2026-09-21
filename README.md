@@ -16,6 +16,7 @@ Every tool here follows the same rules:
 | Added | Tool | What it does |
 |---|---|---|
 | 2026-W39 | [Delivery Date Confidence Calculator](public/delivery-date-confidence/) | Monte Carlo schedule simulator. Turns three-point estimates into P50/P80/P90 delivery dates, tells you the real probability of hitting a date you've already committed to, and ranks which task is actually driving your risk. |
+| 2026-W39 | [Spec Generator](public/spec-generator/) | Prompts you for the six things an AI coding agent can't guess — goal, I/O, constraints, failure modes, out of scope, acceptance criteria — and hands back clean Markdown to paste into a prompt, PR or ticket. |
 
 ---
 
